@@ -1,37 +1,35 @@
 # monosim/Board.py
+from __future__ import annotations
 
-# monosim/Board.py (Add to Space class)
+from dataclasses import dataclass
+from typing import Optional, List
+
+
+@dataclass
 class Space:
-    def __init__(self, name, type, price=0, rent=0, color=None):
-        self.name = name
-        self.type = type
-        self.price = price
-        self.base_rent = rent  # Rename this to base_rent
-        self.houses = 0       # 0 to 5 (5 is a Hotel)
-        self.house_price = 50  # Standardize or vary by color
-        self.color = color
-        self.owner = None
+    name: str
+    type: str
+    price: int = 0
+    base_rent: int = 0
+    color: Optional[str] = None
 
-# Add this utility to the Board class
-
-
-def get_color_count(self, color):
-    """Returns how many properties of a certain color exist on the board."""
-    return sum(1 for s in self.spaces if s.color == color)
+    houses: int = 0         # 0..5 (5 = hotel)
+    house_price: int = 50   # simplified: constant build cost
+    owner: Optional["Player"] = None  # set when bought
 
 
 class Board:
-    # Manages the collection of all spaces on the board.
+    """Manages the collection of all spaces on the board."""
 
     def __init__(self):
-        self.spaces = self._initialize_board()
+        self.spaces: List[Space] = self._initialize_board()
 
-    def _initialize_board(self):
-        # Full data set for a standard Monopoly board (excluding cards)
+    def _initialize_board(self) -> List[Space]:
+        # Standard Monopoly board (cards/taxes/etc are placeholders).
         return [
             Space("Go", "special"),
             Space("Mediterranean Avenue", "property", 60, 2, "brown"),
-            Space("Community Chest", "special"),  # Placeholders as requested
+            Space("Community Chest", "special"),
             Space("Baltic Avenue", "property", 60, 4, "brown"),
             Space("Income Tax", "special"),
             Space("Reading Railroad", "railroad", 200, 25),
@@ -71,16 +69,22 @@ class Board:
             Space("Boardwalk", "property", 400, 50, "dark_blue"),
         ]
 
-    def get_space(self, index):
-        # Returns the space object at a specific position (0-39).
+    def get_space(self, index: int) -> Space:
         return self.spaces[index % 40]
 
-    def get_property_details(self, index):
-        """Helper to get specific info for the simulator."""
+    def get_color_count(self, color: str) -> int:
+        """How many properties of a given color exist on the board."""
+        return sum(1 for s in self.spaces if s.color == color)
+
+    def get_property_details(self, index: int) -> dict:
+        """Helper to get specific info for the simulator/debugging."""
         s = self.get_space(index)
         return {
             "name": s.name,
             "cost": s.price,
-            "rent": s.rent,
-            "type": s.type
+            "base_rent": s.base_rent,
+            "type": s.type,
+            "color": s.color,
+            "owner": None if s.owner is None else s.owner.name,
+            "houses": s.houses,
         }

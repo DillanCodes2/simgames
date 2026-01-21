@@ -3,7 +3,7 @@
 class Player:
     """Represents a player in the Monopoly simulation."""
 
-    def __init__(self, name, starting_balance=1500):
+    def __init__(self, name, starting_balance=1500): #defines a player's state at the start of the game
         self.name = name
         self.balance = starting_balance
         self.position = 0  # 0 is the index for 'Go'
@@ -53,10 +53,10 @@ class Player:
             return True
         return False
 
-    def get_owned_color_count(self, color):
+    def get_owned_color_count(self, color): #Returns the current number of owned colors
         return sum(1 for p in self.properties if p.color == color)
 
-    def owns_monopoly(self, color, board):
+    def owns_monopoly(self, color, board): #Returns whether or not a player owns all properties of one color
         if color is None:
             return False
         return self.get_owned_color_count(color) == board.get_color_count(color)
