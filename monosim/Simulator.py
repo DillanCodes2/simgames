@@ -214,10 +214,13 @@ class Simulation:
         controllers: Optional[List[Controller]] = None,
         verbose: bool = False,
         input_fn: Optional[Callable[[str], str]] = None,
+        event_sink: Optional[Callable[[str], None]] = None,
+
     ):
         self.params = params or {}
         self.verbose = verbose
         self._input = input_fn or input
+        self.event_sink = event_sink
 
         # If controllers are provided, they define the players and decision-making.
         self.controllers: Optional[List[Controller]] = controllers
@@ -249,6 +252,8 @@ class Simulation:
         self.rng.shuffle(self.chest_deck)
 
     def _log(self, msg: str) -> None:
+        if self.event_sink is not None:
+            self.event_sink(msg)
         if self.verbose:
             print(msg)
 
