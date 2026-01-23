@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -49,6 +50,8 @@ def parse_lineup(items: List[str]) -> List[str]:
 
 
 def plot_winrates(win_rates: dict, outfile: str, title: str) -> None:
+    import matplotlib
+    matplotlib.use("Agg")  # avoid Tk/Tcl backend (thread issues on Windows)
     import matplotlib.pyplot as plt
 
     strategies = sorted(win_rates.keys())
@@ -65,10 +68,8 @@ def plot_winrates(win_rates: dict, outfile: str, title: str) -> None:
 
 
 def plot_sweep_heatmap(rows: list[dict], outfile: str, title: str) -> None:
-    """
-    Heatmap: lineups (rows) x strategies (cols), colored by win%.
-    rows is a list of dicts produced by sweep CSV writing.
-    """
+    import matplotlib
+    matplotlib.use("Agg")  # avoid Tk/Tcl backend (thread issues on Windows)
     import matplotlib.pyplot as plt
 
     if not rows:
@@ -76,16 +77,13 @@ def plot_sweep_heatmap(rows: list[dict], outfile: str, title: str) -> None:
 
     strategies = sorted(KNOWN_STRATEGIES)
 
-    # Keep lineups in deterministic order for readability:
-    # first by "more diverse" (more nonzero counts), then lexicographically.
     def diversity_key(tag: str) -> tuple[int, str]:
-        nonzero = tag.count("=")  # rough; tag already excludes zeros
+        nonzero = tag.count("=")
         return (-nonzero, tag)
 
     lineup_tags = [r["lineup_tag"] for r in rows]
     lineup_tags = sorted(set(lineup_tags), key=diversity_key)
 
-    # Build matrix in same order.
     tag_to_row = {r["lineup_tag"]: r for r in rows if r["lineup_tag"] in set(lineup_tags)}
     data = []
     for t in lineup_tags:
@@ -101,6 +99,7 @@ def plot_sweep_heatmap(rows: list[dict], outfile: str, title: str) -> None:
     plt.tight_layout()
     plt.savefig(outfile, dpi=200)
     plt.close()
+
 
 
 def load_existing_tags(results_file: str) -> set[str]:
@@ -140,7 +139,16 @@ def make_plot_path(
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     seed_tag = f"seed{seed}" if seed is not None else "seedNone"
-    filename = f"{ts}__{tag}__g{games}__t{max_turns}__cmin{cautious_min}__{seed_tag}.png"
+
+    # Windows (and some filesystems) reject certain characters in filenames,
+    # notably: <>:"/\\|?*  (and control chars). Our lineup_tag uses "|", so
+    # we must sanitize the tag for the filename while keeping the tag itself
+    # unchanged for printing/CSV readability.
+    safe_tag = tag
+    safe_tag = re.sub(r'[<>:"/\\|?*\x00-\x1F]', "_", safe_tag)
+    safe_tag = safe_tag.strip().strip("._") or "TAG"
+
+    filename = f"{ts}__{safe_tag}__g{games}__t{max_turns}__cmin{cautious_min}__{seed_tag}.png"
     return str(Path(out_dir) / filename)
 
 
