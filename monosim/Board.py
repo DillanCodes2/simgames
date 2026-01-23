@@ -1,90 +1,143 @@
 # monosim/Board.py
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, List
 
 
 @dataclass
 class Space:
     name: str
-    type: str
+    type: str  # "property", "railroad", "utility", "special"
     price: int = 0
-    base_rent: int = 0
     color: Optional[str] = None
 
-    houses: int = 0         # 0..5 (5 = hotel)
-    house_price: int = 50   # simplified: constant build cost
-    owner: Optional["Player"] = None  # set when bought
+    # For standard color properties: rent[0]=no houses, rent[1..4]=1-4 houses, rent[5]=hotel
+    rent: List[int] = field(default_factory=list)
+
+    # House cost (varies by color set in official rules)
+    house_cost: int = 0
+
+    # Mortgage value (official: typically price/2 for properties; railroads/utilities also have mortgage values)
+    mortgage: int = 0
+    mortgaged: bool = False
+
+    # Buildings: 0..4 houses, 5 = hotel
+    houses: int = 0
+
+    owner: Optional["Player"] = None
 
 
 class Board:
-    """Manages the collection of all spaces on the board."""
-
     def __init__(self):
         self.spaces: List[Space] = self._initialize_board()
 
     def _initialize_board(self) -> List[Space]:
-        # Standard Monopoly board (cards/taxes/etc are placeholders).
+        # Official rent tables (US Monopoly). These are the standard values.
+        # Format: [rent, 1h, 2h, 3h, 4h, hotel]
+        def prop(name, price, color, rent, house_cost):
+            return Space(
+                name=name,
+                type="property",
+                price=price,
+                color=color,
+                rent=rent,
+                house_cost=house_cost,
+                mortgage=price // 2,
+            )
+
+        def rr(name):
+            return Space(
+                name=name,
+                type="railroad",
+                price=200,
+                mortgage=100,
+            )
+
+        def util(name):
+            return Space(
+                name=name,
+                type="utility",
+                price=150,
+                mortgage=75,
+            )
+
         return [
             Space("Go", "special"),
-            Space("Mediterranean Avenue", "property", 60, 2, "brown"),
+
+            prop("Mediterranean Avenue", 60, "brown", [2, 10, 30, 90, 160, 250], 50),
             Space("Community Chest", "special"),
-            Space("Baltic Avenue", "property", 60, 4, "brown"),
+            prop("Baltic Avenue", 60, "brown", [4, 20, 60, 180, 320, 450], 50),
             Space("Income Tax", "special"),
-            Space("Reading Railroad", "railroad", 200, 25),
-            Space("Oriental Avenue", "property", 100, 6, "light_blue"),
+
+            rr("Reading Railroad"),
+
+            prop("Oriental Avenue", 100, "light_blue", [6, 30, 90, 270, 400, 550], 50),
             Space("Chance", "special"),
-            Space("Vermont Avenue", "property", 100, 6, "light_blue"),
-            Space("Connecticut Avenue", "property", 120, 8, "light_blue"),
+            prop("Vermont Avenue", 100, "light_blue", [6, 30, 90, 270, 400, 550], 50),
+            prop("Connecticut Avenue", 120, "light_blue", [8, 40, 100, 300, 450, 600], 50),
+
             Space("Just Visiting", "special"),
-            Space("St. Charles Place", "property", 140, 10, "pink"),
-            Space("Electric Company", "utility", 150, 0),
-            Space("States Avenue", "property", 140, 10, "pink"),
-            Space("Virginia Avenue", "property", 160, 12, "pink"),
-            Space("Pennsylvania Railroad", "railroad", 200, 25),
-            Space("St. James Place", "property", 180, 14, "orange"),
+
+            prop("St. Charles Place", 140, "pink", [10, 50, 150, 450, 625, 750], 100),
+            util("Electric Company"),
+            prop("States Avenue", 140, "pink", [10, 50, 150, 450, 625, 750], 100),
+            prop("Virginia Avenue", 160, "pink", [12, 60, 180, 500, 700, 900], 100),
+
+            rr("Pennsylvania Railroad"),
+
+            prop("St. James Place", 180, "orange", [14, 70, 200, 550, 750, 950], 100),
             Space("Community Chest", "special"),
-            Space("Tennessee Avenue", "property", 180, 14, "orange"),
-            Space("New York Avenue", "property", 200, 16, "orange"),
+            prop("Tennessee Avenue", 180, "orange", [14, 70, 200, 550, 750, 950], 100),
+            prop("New York Avenue", 200, "orange", [16, 80, 220, 600, 800, 1000], 100),
+
             Space("Free Parking", "special"),
-            Space("Kentucky Avenue", "property", 220, 18, "red"),
+
+            prop("Kentucky Avenue", 220, "red", [18, 90, 250, 700, 875, 1050], 150),
             Space("Chance", "special"),
-            Space("Indiana Avenue", "property", 220, 18, "red"),
-            Space("Illinois Avenue", "property", 240, 20, "red"),
-            Space("B. & O. Railroad", "railroad", 200, 25),
-            Space("Atlantic Avenue", "property", 260, 22, "yellow"),
-            Space("Ventnor Avenue", "property", 260, 22, "yellow"),
-            Space("Water Works", "utility", 150, 0),
-            Space("Marvin Gardens", "property", 280, 24, "yellow"),
+            prop("Indiana Avenue", 220, "red", [18, 90, 250, 700, 875, 1050], 150),
+            prop("Illinois Avenue", 240, "red", [20, 100, 300, 750, 925, 1100], 150),
+
+            rr("B. & O. Railroad"),
+
+            prop("Atlantic Avenue", 260, "yellow", [22, 110, 330, 800, 975, 1150], 150),
+            prop("Ventnor Avenue", 260, "yellow", [22, 110, 330, 800, 975, 1150], 150),
+            util("Water Works"),
+            prop("Marvin Gardens", 280, "yellow", [24, 120, 360, 850, 1025, 1200], 150),
+
             Space("Go To Jail", "special"),
-            Space("Pacific Avenue", "property", 300, 26, "green"),
-            Space("North Carolina Avenue", "property", 300, 26, "green"),
+
+            prop("Pacific Avenue", 300, "green", [26, 130, 390, 900, 1100, 1275], 200),
+            prop("North Carolina Avenue", 300, "green", [26, 130, 390, 900, 1100, 1275], 200),
             Space("Community Chest", "special"),
-            Space("Pennsylvania Avenue", "property", 320, 28, "green"),
-            Space("Short Line", "railroad", 200, 25),
+            prop("Pennsylvania Avenue", 320, "green", [28, 150, 450, 1000, 1200, 1400], 200),
+
+            rr("Short Line"),
+
             Space("Chance", "special"),
-            Space("Park Place", "property", 350, 35, "dark_blue"),
+
+            prop("Park Place", 350, "dark_blue", [35, 175, 500, 1100, 1300, 1500], 200),
             Space("Luxury Tax", "special"),
-            Space("Boardwalk", "property", 400, 50, "dark_blue"),
+            prop("Boardwalk", 400, "dark_blue", [50, 200, 600, 1400, 1700, 2000], 200),
         ]
 
     def get_space(self, index: int) -> Space:
         return self.spaces[index % 40]
 
     def get_color_count(self, color: str) -> int:
-        """How many properties of a given color exist on the board."""
-        return sum(1 for s in self.spaces if s.color == color)
+        return sum(1 for s in self.spaces if s.type == "property" and s.color == color)
 
     def get_property_details(self, index: int) -> dict:
-        """Helper to get specific info for the simulator/debugging."""
         s = self.get_space(index)
         return {
             "name": s.name,
             "cost": s.price,
-            "base_rent": s.base_rent,
             "type": s.type,
             "color": s.color,
             "owner": None if s.owner is None else s.owner.name,
             "houses": s.houses,
+            "mortgaged": s.mortgaged,
+            "rent": s.rent,
+            "house_cost": s.house_cost,
+            "mortgage": s.mortgage,
         }
