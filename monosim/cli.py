@@ -38,8 +38,10 @@ def parse_lineup(items: List[str]) -> List[str]:
         strategies.extend([strat] * counts[strat])
     return strategies
 
+
 def plot_winrates(win_rates: dict, outfile: str) -> None:
     import matplotlib.pyplot as plt
+
     strategies = sorted(win_rates.keys())
     values = [win_rates[s] for s in strategies]
 
@@ -67,26 +69,56 @@ def main(argv: Optional[List[str]] = None) -> None:
     parser.add_argument("--games", type=int, default=1000, help="Number of games to simulate.")
     parser.add_argument("--max-turns", type=int, default=1000, help="Max turns per game before declaring highest balance winner.")
     parser.add_argument("--seed", type=int, default=None, help="Optional seed for reproducible batch runs.")
+
+    # >>> ADD THIS LINE <<<
+    parser.add_argument(
+        "--cautious-min",
+        type=int,
+        default=500,
+        help="Cautious players only buy if (balance - price) >= this value.",
+)
+
     parser.add_argument("--plot", action="store_true",
                     help="Save a bar chart of win rates.")
     parser.add_argument("--plot-file", default="winrates.png",
                     help="Output PNG filename for the chart.")
 
 
+    # ✅ ADD THIS (this is why argparse was failing)
+    parser.add_argument(
+        "--cautious-min",
+        type=int,
+        default=500,
+        help="Cautious players only buy if (balance - price) >= this value. Ignored if no Cautious players.",
+    )
+
+    parser.add_argument("--plot", action="store_true", help="Save a bar chart of win rates.")
+    parser.add_argument("--plot-file", default="winrates.png", help="Output PNG filename for the chart.")
+
     args = parser.parse_args(argv)
     strategies = parse_lineup(args.lineup)
 
-    win_rates = run_batch(args.games, strategies, max_turns=args.max_turns, seed=args.seed)
+    params = {"cautious_min": args.cautious_min}
 
+    win_rates = run_batch(
+        args.games,
+        strategies,
+        max_turns=args.max_turns,
+        seed=args.seed,
+        params=params,
+    )
+
+    # ✅ Stats printing (this was never reached when argparse errored)
     print("\nLineup:", strategies)
-    print(f"Games: {args.games} | Max turns: {args.max_turns} | Seed: {args.seed}")
+    print(f"Games: {args.games} | Max turns: {args.max_turns} | Seed: {args.seed} | Cautious-min: {args.cautious_min}")
     print("\nWin rates (%):")
     for strat in sorted(KNOWN_STRATEGIES):
         print(f"  {strat:14s} {win_rates[strat]:6.2f}")
-        if args.plot:
-            plot_winrates(win_rates, args.plot_file)
-            print(f"\nSaved plot to: {args.plot_file}")
 
+    # ✅ Plot generation should happen ONCE, after printing
+    if args.plot:
+        plot_winrates(win_rates, args.plot_file)
+        print(f"\nSaved plot to: {args.plot_file}")
 
 
 if __name__ == "__main__":
