@@ -26,9 +26,15 @@ class Simulation:
         self.strategies = strategies
         self.turn_count = 0
         self.last_roll = 0
-        self.rng = random.Random()
-        self.last_roll = 0  # keep for utilities later
+        self._init_decks()
 
+
+    def _init_decks(self) -> None:
+        # Each deck is a list of (card_name, handler_function, keepable)
+        self.chance_deck = self._build_chance_deck()
+        self.chest_deck = self._build_chest_deck()
+        self.rng.shuffle(self.chance_deck)
+        self.rng.shuffle(self.chest_deck)
 
     def roll_dice(self):
         d1 = self.rng.randint(1, 6)
@@ -37,6 +43,329 @@ class Simulation:
 
     JAIL_INDEX = 10        # "Just Visiting / In Jail" is index 10 on standard board
     GO_TO_JAIL_INDEX = 30  # "Go To Jail" is index 30
+    # Standard board indices (matching your Board ordering) :contentReference[oaicite:8]{index=8}
+    GO_INDEX = 0
+    JAIL_INDEX = 10
+    GO_TO_JAIL_INDEX = 30
+
+    READING_RR_INDEX = 5
+    ST_CHARLES_INDEX = 11
+    ILLINOIS_INDEX = 24
+    BOARDWALK_INDEX = 39
+
+    CHANCE_INDICES = {7, 22, 36}
+    CHEST_INDICES = {2, 17, 33}
+
+    def resolve_landing(self, player_index: int) -> str:
+        """Resolve the current space: cards, taxes, jail, property, etc."""
+        player = self.players[player_index]
+        strategy = self.strategies[player_index]
+
+        safety = 0
+        while safety < 10:
+            safety += 1
+            space = self.board.get_space(player.position)
+
+            # Go To Jail
+            if player.position == self.GO_TO_JAIL_INDEX or space.name == "Go To Jail":
+                self.send_to_jail(player)
+                return "OK"
+
+            # Chance / Community Chest
+            if space.name == "Chance" or player.position in self.CHANCE_INDICES:
+                self.draw_card("chance", player_index)
+                # card may move player; loop again to resolve new square
+                continue
+
+            if space.name == "Community Chest" or player.position in self.CHEST_INDICES:
+                self.draw_card("chest", player_index)
+                continue
+
+            # Taxes (Hasbro official baseline amounts; choosing 10% needs net worth logic)
+            if space.name == "Income Tax":
+                player.remove_funds(200)
+                return "OK" if player.balance > 0 else "BANKRUPT"
+
+            if space.name == "Luxury Tax":
+                player.remove_funds(100)
+                return "OK" if player.balance > 0 else "BANKRUPT"
+
+            # Normal property / rent / auction logic
+            status = self.handle_property_logic(player, space, strategy)
+            return status
+
+        return "OK"
+
+
+    def _build_chest_deck(self):
+        def advance_to_go(pi):
+            self.move_to(self.players[pi], self.GO_INDEX, collect_go=True)
+            return False
+
+        def bank_error_200(pi):
+            self.players[pi].add_funds(200)
+            return False
+
+        def doctors_fee_50(pi):
+            self.players[pi].remove_funds(50)
+            return False
+
+        def sale_of_stock_50(pi):
+            self.players[pi].add_funds(50)
+            return False
+
+        def get_out_of_jail_free(pi):
+            self.players[pi].get_out_of_jail_free_chest += 1
+            return True
+
+        def go_to_jail(pi):
+            self.send_to_jail(self.players[pi])
+            return False
+
+        def holiday_fund_100(pi):
+            self.players[pi].add_funds(100)
+            return False
+
+        def income_tax_refund_20(pi):
+            self.players[pi].add_funds(20)
+            return False
+
+        def birthday_collect_10_each(pi):
+            receiver = self.players[pi]
+            for j, other in enumerate(self.players):
+                if j == pi or other.balance <= 0:
+                    continue
+                if other.remove_funds(10):
+                    receiver.add_funds(10)
+            return False
+
+        def life_insurance_100(pi):
+            self.players[pi].add_funds(100)
+            return False
+
+        def hospital_fee_100(pi):
+            self.players[pi].remove_funds(100)
+            return False
+
+        def school_fee_150(pi):
+            self.players[pi].remove_funds(150)
+            return False
+
+        def consultancy_25(pi):
+            self.players[pi].add_funds(25)
+            return False
+
+        def street_repairs(pi):
+            player = self.players[pi]
+            houses, hotels = self.house_hotel_counts(player)
+            cost = houses * 40 + hotels * 115
+            player.remove_funds(cost)
+            return False
+
+        def beauty_prize_10(pi):
+            self.players[pi].add_funds(10)
+            return False
+
+        def inherit_100(pi):
+            self.players[pi].add_funds(100)
+            return False
+
+        return [
+            ("Advance to Go", advance_to_go, False),
+            ("Bank error in your favor ($200)", bank_error_200, False),
+            ("Doctor's fee ($50)", doctors_fee_50, False),
+            ("From sale of stock you get $50", sale_of_stock_50, False),
+            ("Get Out of Jail Free", get_out_of_jail_free, True),
+            ("Go to Jail", go_to_jail, False),
+            ("Holiday fund matures ($100)", holiday_fund_100, False),
+            ("Income tax refund ($20)", income_tax_refund_20, False),
+            ("It is your birthday — collect $10 from each", birthday_collect_10_each, False),
+            ("Life insurance matures ($100)", life_insurance_100, False),
+            ("Pay hospital fees ($100)", hospital_fee_100, False),
+            ("Pay school fees ($150)", school_fee_150, False),
+            ("Receive for services ($25)", consultancy_25, False),
+            ("You are assessed for street repairs", street_repairs, False),
+            ("Second prize in a beauty contest ($10)", beauty_prize_10, False),
+            ("You inherit $100", inherit_100, False),
+        ]
+
+
+    def _build_chance_deck(self):
+        def advance_to_go(pi): 
+            self.move_to(self.players[pi], self.GO_INDEX, collect_go=True)
+            return False
+
+        def advance_to_illinois(pi):
+            self.move_to(self.players[pi], self.ILLINOIS_INDEX, collect_go=True)
+            return False
+
+        def advance_to_st_charles(pi):
+            self.move_to(self.players[pi], self.ST_CHARLES_INDEX, collect_go=True)
+            return False
+
+        def advance_to_boardwalk(pi):
+            self.move_to(self.players[pi], self.BOARDWALK_INDEX, collect_go=True)
+            return False
+
+        def trip_to_reading(pi):
+            self.move_to(self.players[pi], self.READING_RR_INDEX, collect_go=True)
+            return False
+
+        def nearest_rr_pay_double(pi):
+            player = self.players[pi]
+            dest = self.nearest_railroad(player.position)
+            self.move_to(player, dest, collect_go=True)
+            rr = self.board.get_space(dest)
+            if rr.owner is None:
+                # will be handled by landing resolution (buy/auction)
+                return False
+            if rr.owner is player:
+                return False
+            # pay double rent
+            rent = self.calculate_rent(rr) * 2
+            ok = player.remove_funds(rent)
+            rr.owner.add_funds(rent)
+            return False
+
+        def nearest_util(pi):
+            player = self.players[pi]
+            dest = self.nearest_utility(player.position)
+            self.move_to(player, dest, collect_go=True)
+            u = self.board.get_space(dest)
+            if u.owner is None:
+                return False
+            if u.owner is player:
+                return False
+            # Roll and pay 10x dice (official chance utility card) :contentReference[oaicite:10]{index=10}
+            d1, d2, total, _ = self.roll_dice()
+            self.last_roll = total
+            rent = 10 * total
+            ok = player.remove_funds(rent)
+            u.owner.add_funds(rent)
+            return False
+
+        def bank_dividend_50(pi):
+            self.players[pi].add_funds(50)
+            return False
+
+        def poor_tax_15(pi):
+            self.players[pi].remove_funds(15)
+            return False
+
+        def building_loan_150(pi):
+            self.players[pi].add_funds(150)
+            return False
+
+        def chairman_pay_50_each(pi):
+            payer = self.players[pi]
+            for j, other in enumerate(self.players):
+                if j == pi or other.balance <= 0:
+                    continue
+                if payer.remove_funds(50):
+                    other.add_funds(50)
+            return False
+
+        def general_repairs(pi):
+            player = self.players[pi]
+            houses, hotels = self.house_hotel_counts(player)
+            cost = houses * 25 + hotels * 100
+            player.remove_funds(cost)
+            return False
+
+        def go_back_3(pi):
+            player = self.players[pi]
+            player.position = (player.position - 3) % 40
+            return False
+
+        def go_to_jail(pi):
+            self.send_to_jail(self.players[pi])
+            return False
+
+        def get_out_of_jail_free(pi):
+            self.players[pi].get_out_of_jail_free_chance += 1
+            return True
+
+        return [
+            ("Advance to Go", advance_to_go, False),
+            ("Advance to Illinois Avenue", advance_to_illinois, False),
+            ("Advance to St. Charles Place", advance_to_st_charles, False),
+            ("Advance to Boardwalk", advance_to_boardwalk, False),
+            ("Take a trip to Reading Railroad", trip_to_reading, False),
+            ("Advance to nearest Railroad (pay double)", nearest_rr_pay_double, False),
+            ("Advance to nearest Railroad (pay double)", nearest_rr_pay_double, False),
+            ("Advance to nearest Utility", nearest_util, False),
+            ("Bank pays you dividend of $50", bank_dividend_50, False),
+            ("Pay poor tax of $15", poor_tax_15, False),
+            ("Your building and loan matures ($150)", building_loan_150, False),
+            ("Elected Chairman — pay each player $50", chairman_pay_50_each, False),
+            ("Make general repairs", general_repairs, False),
+            ("Go back 3 spaces", go_back_3, False),
+            ("Go to Jail", go_to_jail, False),
+            ("Get Out of Jail Free", get_out_of_jail_free, True),
+        ]
+
+
+    def draw_card(self, deck_name: str, player_index: int) -> None:
+        deck = self.chance_deck if deck_name == "chance" else self.chest_deck
+        card_name, fn, keepable = deck.pop(0)
+
+        keep = fn(player_index)  # True means player keeps (GOOJF)
+        if keepable and keep:
+            # Card stays with player until used; do NOT return to deck now
+            return
+
+        # otherwise return to bottom
+        deck.append((card_name, fn, keepable))
+
+
+    def return_get_out_of_jail_free_to_bottom(self, deck_name: str) -> None:
+        """When player uses the card, return it to bottom of the correct deck."""
+        if deck_name == "chance":
+            # find the GOOJF card template (re-create handler)
+            for i, (name, fn, keepable) in enumerate(self._build_chance_deck()):
+                if name == "Get Out of Jail Free":
+                    self.chance_deck.append((name, fn, keepable))
+                    return
+        else:
+            for i, (name, fn, keepable) in enumerate(self._build_chest_deck()):
+                if name == "Get Out of Jail Free":
+                    self.chest_deck.append((name, fn, keepable))
+                    return
+
+
+    def move_to(self, player: Player, index: int, collect_go: bool = True) -> None:
+        """Move directly to a board index. Collect $200 if passing Go and collect_go=True."""
+        index %= 40
+        if collect_go and index < player.position:
+            player.add_funds(200)
+        player.position = index
+
+    def nearest_index_of_type(self, start_pos: int, space_type: str) -> int:
+        """Find next space of given type by moving forward (wraps)."""
+        for step in range(1, 41):
+            idx = (start_pos + step) % 40
+            if self.board.get_space(idx).type == space_type:
+                return idx
+        return start_pos
+
+    def nearest_railroad(self, start_pos: int) -> int:
+        return self.nearest_index_of_type(start_pos, "railroad")
+
+    def nearest_utility(self, start_pos: int) -> int:
+        return self.nearest_index_of_type(start_pos, "utility")
+
+    def house_hotel_counts(self, player: Player) -> tuple[int, int]:
+        houses = 0
+        hotels = 0
+        for p in player.properties:
+            if p.type == "property":
+                if p.houses == 5:
+                    hotels += 1
+                elif p.houses > 0:
+                    houses += p.houses
+        return houses, hotels
+
+
 
     def send_to_jail(self, player: Player):
         player.position = self.JAIL_INDEX
@@ -251,6 +580,13 @@ class Simulation:
             continue_turn = False  # only becomes True again if we roll doubles (and not jailed)
 
             # --- JAIL HANDLING ---
+            if player.is_in_jail and player.has_get_out_of_jail_free():
+                used_from = player.use_get_out_of_jail_free()
+                player.is_in_jail = False
+                player.jail_turns = 0
+                if used_from:
+                    self.return_get_out_of_jail_free_to_bottom(used_from)
+
             if player.is_in_jail:
                 can_move, roll_total = self.take_jail_turn(player)
                 if not can_move:
@@ -279,7 +615,7 @@ class Simulation:
                 return True
 
             # --- PROPERTY / RENT / AUCTION LOGIC ---
-            status = self.handle_property_logic(player, current_space, strategy)
+            status = self.resolve_landing(player_index)
 
             if status == "BANKRUPT":
                 return False

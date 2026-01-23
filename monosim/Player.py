@@ -10,6 +10,9 @@ class Player:
         self.properties = []  # List of Space objects owned
         self.is_in_jail = False
         self.jail_turns = 0
+        self.get_out_of_jail_free_chance = 0
+        self.get_out_of_jail_free_chest = 0
+
 
     def move(self, roll_total):
         """
@@ -64,3 +67,17 @@ class Player:
     def __repr__(self):
         """Technical string representation for debugging."""
         return f"Player({self.name}, Balance: ${self.balance}, Pos: {self.position})"
+    
+    def has_get_out_of_jail_free(self) -> bool:
+        return (self.get_out_of_jail_free_chance + self.get_out_of_jail_free_chest) > 0
+
+    def use_get_out_of_jail_free(self) -> str | None:
+        """Returns which deck the used card came from: 'chance' or 'chest'."""
+        if self.get_out_of_jail_free_chance > 0:
+            self.get_out_of_jail_free_chance -= 1
+            return "chance"
+        if self.get_out_of_jail_free_chest > 0:
+            self.get_out_of_jail_free_chest -= 1
+            return "chest"
+        return None
+
