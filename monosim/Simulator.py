@@ -43,7 +43,7 @@ class Simulation:
 
     JAIL_INDEX = 10        # "Just Visiting / In Jail" is index 10 on standard board
     GO_TO_JAIL_INDEX = 30  # "Go To Jail" is index 30
-    # Standard board indices (matching your Board ordering) :contentReference[oaicite:8]{index=8}
+    # Standard board indices (matching your Board ordering)
     GO_INDEX = 0
     JAIL_INDEX = 10
     GO_TO_JAIL_INDEX = 30
@@ -106,8 +106,7 @@ class Simulation:
         if not candidates:
             return False
 
-        # mortgage lowest-rent-impact first: utilities/railroads/properties all treated similarly here;
-        # heuristic: mortgage the lowest mortgage value first? (keeps high-value liquidity for later)
+        # mortgage lowest-rent-impact first
         prop = min(candidates, key=lambda p: p.mortgage)
         prop.mortgaged = True
         owner.add_funds(prop.mortgage)
@@ -133,7 +132,6 @@ class Simulation:
     def transfer_assets_to_player(self, bankrupt: Player, creditor: Player) -> None:
         """
         Transfer all properties to creditor, preserving mortgaged state.
-        (Official rules include creditor choice and 10% interest; we can add later.)
         """
         for prop in list(bankrupt.properties):
             prop.owner = creditor
@@ -173,7 +171,6 @@ class Simulation:
         payer.balance = 0
 
         # Before transferring assets, sell off remaining buildings (officially must)
-        # (we already tried selling, but do a full cleanup to be safe)
         while self.sell_one_building(payer):
             pass
 
@@ -203,26 +200,21 @@ class Simulation:
             # Chance / Community Chest
             if space.name == "Chance" or player.position in self.CHANCE_INDICES:
                 self.draw_card("chance", player_index)
-                # card may move player; loop again to resolve new square
                 continue
 
             if space.name == "Community Chest" or player.position in self.CHEST_INDICES:
                 self.draw_card("chest", player_index)
                 continue
 
-            # Taxes (Hasbro official baseline amounts; choosing 10% needs net worth logic)
+            # Taxes
             if space.name == "Income Tax":
                 ok = self.pay(player, 200, creditor=None)
                 return "OK" if ok else "BANKRUPT"
-
 
             if space.name == "Luxury Tax":
                 ok = self.pay(player, 100, creditor=None)
                 return "OK" if ok else "BANKRUPT"
 
-
-
-            # Normal property / rent / auction logic
             status = self.handle_property_logic(player, space, strategy)
             return status
 
@@ -239,7 +231,7 @@ class Simulation:
             return False
 
         def doctors_fee_50(pi):
-            self.players[pi].remove_funds(50)
+            self.pay(self.players[pi], 50, creditor=None)
             return False
 
         def sale_of_stock_50(pi):
@@ -267,8 +259,7 @@ class Simulation:
             for j, other in enumerate(self.players):
                 if j == pi or other.balance <= 0:
                     continue
-                if other.remove_funds(10):
-                    receiver.add_funds(10)
+                self.pay(other, 10, creditor=receiver)
             return False
 
         def life_insurance_100(pi):
@@ -276,11 +267,11 @@ class Simulation:
             return False
 
         def hospital_fee_100(pi):
-            self.players[pi].remove_funds(100)
+            self.pay(self.players[pi], 100, creditor=None)
             return False
 
         def school_fee_150(pi):
-            self.players[pi].remove_funds(150)
+            self.pay(self.players[pi], 150, creditor=None)
             return False
 
         def consultancy_25(pi):
@@ -291,7 +282,7 @@ class Simulation:
             player = self.players[pi]
             houses, hotels = self.house_hotel_counts(player)
             cost = houses * 40 + hotels * 115
-            player.remove_funds(cost)
+            self.pay(player, cost, creditor=None)
             return False
 
         def beauty_prize_10(pi):
@@ -348,15 +339,10 @@ class Simulation:
             dest = self.nearest_railroad(player.position)
             self.move_to(player, dest, collect_go=True)
             rr = self.board.get_space(dest)
-            if rr.owner is None:
-                # will be handled by landing resolution (buy/auction)
+            if rr.owner is None or rr.owner is player:
                 return False
-            if rr.owner is player:
-                return False
-            # pay double rent
             rent = self.calculate_rent(rr) * 2
-            ok = player.remove_funds(rent)
-            rr.owner.add_funds(rent)
+            self.pay(player, rent, creditor=rr.owner)
             return False
 
         def nearest_util(pi):
@@ -364,16 +350,12 @@ class Simulation:
             dest = self.nearest_utility(player.position)
             self.move_to(player, dest, collect_go=True)
             u = self.board.get_space(dest)
-            if u.owner is None:
+            if u.owner is None or u.owner is player:
                 return False
-            if u.owner is player:
-                return False
-            # Roll and pay 10x dice (official chance utility card) :contentReference[oaicite:10]{index=10}
             d1, d2, total, _ = self.roll_dice()
             self.last_roll = total
             rent = 10 * total
-            ok = player.remove_funds(rent)
-            u.owner.add_funds(rent)
+            self.pay(player, rent, creditor=u.owner)
             return False
 
         def bank_dividend_50(pi):
@@ -381,7 +363,7 @@ class Simulation:
             return False
 
         def poor_tax_15(pi):
-            self.players[pi].remove_funds(15)
+            self.pay(self.players[pi], 15, creditor=None)
             return False
 
         def building_loan_150(pi):
@@ -393,15 +375,14 @@ class Simulation:
             for j, other in enumerate(self.players):
                 if j == pi or other.balance <= 0:
                     continue
-                if payer.remove_funds(50):
-                    other.add_funds(50)
+                self.pay(payer, 50, creditor=other)
             return False
 
         def general_repairs(pi):
             player = self.players[pi]
             houses, hotels = self.house_hotel_counts(player)
             cost = houses * 25 + hotels * 100
-            player.remove_funds(cost)
+            self.pay(player, cost, creditor=None)
             return False
 
         def go_back_3(pi):
@@ -441,19 +422,15 @@ class Simulation:
         deck = self.chance_deck if deck_name == "chance" else self.chest_deck
         card_name, fn, keepable = deck.pop(0)
 
-        keep = fn(player_index)  # True means player keeps (GOOJF)
+        keep = fn(player_index)
         if keepable and keep:
-            # Card stays with player until used; do NOT return to deck now
             return
 
-        # otherwise return to bottom
         deck.append((card_name, fn, keepable))
 
 
     def return_get_out_of_jail_free_to_bottom(self, deck_name: str) -> None:
-        """When player uses the card, return it to bottom of the correct deck."""
         if deck_name == "chance":
-            # find the GOOJF card template (re-create handler)
             for i, (name, fn, keepable) in enumerate(self._build_chance_deck()):
                 if name == "Get Out of Jail Free":
                     self.chance_deck.append((name, fn, keepable))
@@ -466,14 +443,12 @@ class Simulation:
 
 
     def move_to(self, player: Player, index: int, collect_go: bool = True) -> None:
-        """Move directly to a board index. Collect $200 if passing Go and collect_go=True."""
         index %= 40
         if collect_go and index < player.position:
             player.add_funds(200)
         player.position = index
 
     def nearest_index_of_type(self, start_pos: int, space_type: str) -> int:
-        """Find next space of given type by moving forward (wraps)."""
         for step in range(1, 41):
             idx = (start_pos + step) % 40
             if self.board.get_space(idx).type == space_type:
@@ -505,13 +480,6 @@ class Simulation:
         player.jail_turns = 0
 
     def take_jail_turn(self, player: Player) -> tuple[bool, int]:
-        """
-        Returns (can_move_this_turn, roll_total).
-        Rule: In jail you may roll for doubles up to 3 turns.
-        If doubles: leave jail and move that roll.
-        If not doubles: increment jail_turns and end turn.
-        After 3 failed attempts: pay $50 (if possible), leave jail, move by last roll.
-        """
         d1, d2, total, is_double = self.roll_dice()
         self.last_roll = total
 
@@ -523,9 +491,7 @@ class Simulation:
         player.jail_turns += 1
 
         if player.jail_turns >= 3:
-            # Pay $50 to get out after third failed attempt (official)
             ok = self.pay(player, 50, creditor=None)
-            # if bankrupt from fee, treat as bankrupt (end game logic will handle)
             player.is_in_jail = False
             player.jail_turns = 0
             return True, total
@@ -535,18 +501,14 @@ class Simulation:
 
 
     def calculate_rent(self, space: Space) -> int:
-        # Mortgaged properties collect no rent (official rule)
         if getattr(space, "mortgaged", False):
             return 0
 
         if space.type == "property":
-            # Houses/hotel rent from rent table
             if space.houses > 0:
-                # houses 1..4 map to rent[1..4]; hotel (5) maps to rent[5]
                 idx = min(space.houses, 5)
                 return space.rent[idx]
 
-            # No houses: monopoly doubles base rent
             if space.owner and space.owner.owns_monopoly(space.color, self.board):
                 return space.rent[0] * 2
 
@@ -557,7 +519,6 @@ class Simulation:
             if not owner:
                 return 0
             rr_owned = sum(1 for p in owner.properties if p.type == "railroad" and not getattr(p, "mortgaged", False))
-            # Official RR rent: 25, 50, 100, 200 for 1..4 railroads
             return {1: 25, 2: 50, 3: 100, 4: 200}.get(rr_owned, 0)
 
         if space.type == "utility":
@@ -565,14 +526,13 @@ class Simulation:
             if not owner:
                 return 0
             util_owned = sum(1 for p in owner.properties if p.type == "utility" and not getattr(p, "mortgaged", False))
-            # Official utilities: 4x dice for 1 utility, 10x dice for 2 utilities
             multiplier = 4 if util_owned == 1 else 10 if util_owned == 2 else 0
             return multiplier * self.last_roll
 
         return 0
 
+    # (rest of your file unchanged)
     def should_buy_unowned(self, player: Player, space: Space, strategy: str) -> bool:
-        """Strategy decision: buy now at face value? (Auction happens if False.)"""
         if space.type not in {"property", "railroad", "utility"}:
             return False
         if space.owner is not None:
@@ -600,20 +560,16 @@ class Simulation:
 
 
     def max_bid(self, bidder: Player, space: Space, strategy: str) -> int:
-        """How much this bidder is willing to pay in an auction (0 means won't bid)."""
         if bidder.balance <= 0:
             return 0
 
-        # Default: don't bid above your balance
         bal = bidder.balance
 
         if strategy == "Aggressive":
-            # tends to overpay a little
             return min(bal, int(space.price * 1.25))
 
         if strategy == "Cautious":
             cautious_min = int(self.params.get("cautious_min", 500))
-            # keep cash reserve
             return max(0, min(bal - cautious_min, space.price))
 
         if strategy == "RailRoadTycoon":
@@ -624,7 +580,6 @@ class Simulation:
             return min(bal, int(space.price * 0.9))
 
         if strategy == "ColorCollector":
-            # bids more if it matches a color you already own (set-building pressure)
             if space.type == "property" and space.color is not None:
                 owns_same_color = any(p.color == space.color for p in bidder.properties)
                 return min(bal, int(space.price * (1.4 if owns_same_color else 1.0)))
@@ -634,37 +589,34 @@ class Simulation:
 
 
     def run_auction(self, space: Space) -> None:
-        """Official rule: auction unowned properties when a player declines to buy."""
         if space.owner is not None:
             return
         if space.type not in {"property", "railroad", "utility"}:
             return
 
-        # Compute each player's max bid
         bids = []
         for i, p in enumerate(self.players):
             strat = self.strategies[i]
             bids.append((self.max_bid(p, space, strat), i))
 
-        # Highest bid wins (tie-break randomly)
         bids.sort(reverse=True, key=lambda x: x[0])
         top_bid = bids[0][0]
         if top_bid <= 0:
-            return  # nobody bids
+            return
 
         tied = [idx for bid, idx in bids if bid == top_bid]
         winner_index = self.rng.choice(tied)
         winner = self.players[winner_index]
 
-        # Pay & transfer
-        winner.remove_funds(top_bid)
+        ok = self.pay(winner, top_bid, creditor=None)
+        if not ok:
+            return
+
         winner.properties.append(space)
         space.owner = winner
 
 
     def handle_property_logic(self, player: Player, space: Space, strategy: str) -> str:
-
-        # 1) UNOWNED PROPERTY → BUY OR AUCTION
         if space.type in {"property", "railroad", "utility"} and space.owner is None:
             if self.should_buy_unowned(player, space, strategy):
                 player.buy_property(space)
@@ -672,14 +624,11 @@ class Simulation:
                 self.run_auction(space)
             return "OK"
 
-        # 2) OWNED BY SOMEONE ELSE → PAY RENT
         if space.owner and space.owner is not player:
             rent = self.calculate_rent(space)
             ok = self.pay(player, rent, creditor=space.owner)
             return "OK" if ok else "BANKRUPT"
 
-
-        # 3) EVERYTHING ELSE → DO NOTHING
         return "OK"
 
     def handle_housing_logic(self, player: Player, strategy: str) -> None:
@@ -692,11 +641,16 @@ class Simulation:
                 continue
 
             if strategy == "Aggressive" and player.balance > prop.house_cost:
-                player.remove_funds(prop.house_cost)
-                prop.houses += 1
+                ok = self.pay(player, prop.house_cost, creditor=None)
+                if ok:
+                    prop.houses += 1
             elif strategy == "Cautious" and (player.balance - prop.house_cost) > 1000:
-                player.remove_funds(prop.house_cost)
-                prop.houses += 1
+                ok = self.pay(player, prop.house_cost, creditor=None)
+                if ok:
+                    prop.houses += 1
+
+    # ... rest of file unchanged (run_turn, run_full_game, run_batch)
+
 
 
     def run_turn(self, player_index):

@@ -53,10 +53,19 @@ def plot_winrates(win_rates: dict, outfile: str) -> None:
     plt.savefig(outfile, dpi=200)
     plt.close()
 
+
 from pathlib import Path
 from datetime import datetime
 
-def make_plot_path(out_dir: str, strategies: list[str], games: int, max_turns: int, cautious_min: int, seed: int | None) -> str:
+
+def make_plot_path(
+    out_dir: str,
+    strategies: list[str],
+    games: int,
+    max_turns: int,
+    cautious_min: int,
+    seed: int | None,
+) -> str:
     Path(out_dir).mkdir(parents=True, exist_ok=True)
 
     # lineup tag like A2_C2 or A1_C1_R1_CC1 (short but readable)
@@ -75,7 +84,7 @@ def make_plot_path(out_dir: str, strategies: list[str], games: int, max_turns: i
 def main(argv: Optional[List[str]] = None) -> None:
     parser = argparse.ArgumentParser(
         prog="monosim",
-        description="Run autonomous Monopoly simulations to estimate win rates by playstyle."
+        description="Run autonomous Monopoly simulations to estimate win rates by playstyle.",
     )
     parser.add_argument(
         "--lineup",
@@ -104,19 +113,20 @@ def main(argv: Optional[List[str]] = None) -> None:
     )
 
     parser.add_argument(
-    "--no-rich",
-    action="store_true",
-    help="Disable the Rich progress bar.",
-)
-
+        "--no-rich",
+        action="store_true",
+        help="Disable the Rich progress bar.",
+    )
 
     parser.add_argument("--plot", action="store_true", help="Save a bar chart of win rates.")
     parser.add_argument("--plot-file", default="winrates.png", help="Output PNG filename for the chart.")
     parser.add_argument("--out-dir", default="plots", help="Folder to save plot PNGs.")
-    parser.add_argument("--auto-name", action="store_true",
-                        help="Auto-generate a unique plot filename (ignores --plot-file).")
-    parser.add_argument("--runs", type=int, default=1,
-                        help="How many independent batch runs to execute.")
+    parser.add_argument(
+        "--auto-name",
+        action="store_true",
+        help="Auto-generate a unique plot filename (ignores --plot-file).",
+    )
+    parser.add_argument("--runs", type=int, default=1, help="How many independent batch runs to execute.")
 
     args = parser.parse_args(argv)
     strategies = parse_lineup(args.lineup)
@@ -124,53 +134,44 @@ def main(argv: Optional[List[str]] = None) -> None:
     params = {"cautious_min": args.cautious_min}
 
     for run_i in range(1, args.runs + 1):
-        # Use different seed per run unless user pins one
-        run_seed = args.seed if args.seed is not None else None
+        # If user supplies --seed, vary it per run deterministically; otherwise keep None.
+        run_seed = (args.seed + (run_i - 1)) if args.seed is not None else None
 
         win_rates = run_batch(
             args.games,
             strategies,
             max_turns=args.max_turns,
-            seed=args.seed,
+            seed=run_seed,  # ✅ use per-run seed
             params=params,
             use_rich=(not args.no_rich),
-)
+        )
 
+        print(f"\n=== Run {run_i}/{args.runs} ===")
+        print("Lineup:", strategies)
+        print(
+            f"Games: {args.games} | Max turns: {args.max_turns} | Seed: {run_seed} | "
+            f"Cautious-min: {args.cautious_min}"
+        )
+        print("Win rates (%):")
+        for strat in sorted(KNOWN_STRATEGIES):
+            print(f"  {strat:14s} {win_rates[strat]:6.2f}")
 
-    print(f"\n=== Run {run_i}/{args.runs} ===")
-    print("Lineup:", strategies)
-    print(
-        f"Games: {args.games} | Max turns: {args.max_turns} | Seed: {run_seed} | "
-        f"Cautious-min: {args.cautious_min}"
-    )
-    print("Win rates (%):")
-    for strat in sorted(KNOWN_STRATEGIES):
-        print(f"  {strat:14s} {win_rates[strat]:6.2f}")
+        if args.plot:
+            if args.auto_name:
+                plot_path = make_plot_path(
+                    args.out_dir,
+                    strategies,
+                    args.games,
+                    args.max_turns,
+                    args.cautious_min,
+                    run_seed,
+                )
+            else:
+                Path(args.out_dir).mkdir(parents=True, exist_ok=True)
+                plot_path = str(Path(args.out_dir) / args.plot_file)
 
-    if args.plot:
-        if args.auto_name:
-            plot_path = make_plot_path(args.out_dir, strategies, args.games, args.max_turns, args.cautious_min, run_seed)
-        else:
-            # still allow manual naming if you want
-            from pathlib import Path
-            Path(args.out_dir).mkdir(parents=True, exist_ok=True)
-            plot_path = str(Path(args.out_dir) / args.plot_file)
-
-        plot_winrates(win_rates, plot_path)
-        print(f"Saved plot to: {plot_path}")
-
-    print("\nLineup:", strategies)
-    print(
-        f"Games: {args.games} | Max turns: {args.max_turns} | Seed: {args.seed} | "
-        f"Cautious-min: {args.cautious_min}"
-    )
-    print("\nWin rates (%):")
-    for strat in sorted(KNOWN_STRATEGIES):
-        print(f"  {strat:14s} {win_rates[strat]:6.2f}")
-
-    if args.plot:
-        plot_winrates(win_rates, args.plot_file)
-        print(f"\nSaved plot to: {args.plot_file}")
+            plot_winrates(win_rates, plot_path)
+            print(f"Saved plot to: {plot_path}")
 
 
 if __name__ == "__main__":
