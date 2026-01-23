@@ -141,7 +141,7 @@ def run_batch(
     max_turns: int = 1000,
     seed: Optional[int] = None,
     params: Optional[dict] = None,
-    progress_every: int = 0,
+    use_rich: bool = True,
 ) -> Dict[str, float]:
     if len(strategies) != 4:
         raise ValueError("run_batch requires exactly 4 strategies.")
@@ -149,13 +149,46 @@ def run_batch(
     rng = random.Random(seed)
     wins = Counter()
 
-    for i in range(iterations):
-        game_seed = rng.randint(0, 2**31 - 1)
-        sim = Simulation(strategies, seed=game_seed, params=params)
-        winner_strategy, _ = sim.run_full_game(max_turns=max_turns)
-        wins[winner_strategy] += 1
+    # Try Rich progress if requested; otherwise silently fall back.
+    progress = None
+    task_id = None
+    if use_rich:
+        try:
+            from rich.progress import (
+                Progress,
+                SpinnerColumn,
+                BarColumn,
+                TextColumn,
+                MofNCompleteColumn,
+                TimeElapsedColumn,
+                TimeRemainingColumn,
+            )
+            progress = Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                TimeElapsedColumn(),
+                TimeRemainingColumn(),
+                transient=True,  # cleans up the bar when done
+            )
+            progress.start()
+            task_id = progress.add_task("Simulating games", total=iterations)
+        except Exception:
+            progress = None
+            task_id = None
 
-        if progress_every and (i + 1) % progress_every == 0:
-            print(f"Completed {i+1}/{iterations} games...")
+    try:
+        for _ in range(iterations):
+            game_seed = rng.randint(0, 2**31 - 1)
+            sim = Simulation(strategies, seed=game_seed, params=params)
+            winner_strategy, _ = sim.run_full_game(max_turns=max_turns)
+            wins[winner_strategy] += 1
+
+            if progress is not None and task_id is not None:
+                progress.update(task_id, advance=1)
+    finally:
+        if progress is not None:
+            progress.stop()
 
     return {s: (wins[s] / iterations) * 100.0 for s in KNOWN_STRATEGIES}
