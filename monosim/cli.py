@@ -51,26 +51,50 @@ def parse_lineup(items: List[str]) -> List[str]:
 
 def plot_winrates(win_rates: dict, outfile: str, title: str) -> None:
     import matplotlib
-    matplotlib.use("Agg")  # avoid Tk/Tcl backend (thread issues on Windows)
+    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    import textwrap
 
     strategies = sorted(win_rates.keys())
     values = [win_rates[s] for s in strategies]
 
-    plt.figure()
-    plt.bar(strategies, values)
+    # Wrap long titles
+    wrapped = "\n".join(textwrap.wrap(title, width=40))
+
+    plt.figure(figsize=(8, 5))
+    bars = plt.bar(strategies, values)
+
     plt.ylabel("Win rate (%)")
-    plt.title(title)
-    plt.ylim(0, max(values) * 1.15 if max(values) > 0 else 1)
-    plt.tight_layout()
+    plt.title(wrapped, pad=12)
+
+    ymax = max(values) if values else 1
+    plt.ylim(0, ymax * 1.25 if ymax > 0 else 1)
+
+    # Value labels on bars
+    for bar, val in zip(bars, values):
+        plt.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + ymax * 0.03,
+            f"{val:.1f}%",
+            ha="center",
+            va="bottom",
+            fontsize=10,
+        )
+
+    # Reserve space for title + labels
+    plt.tight_layout(rect=(0, 0, 1, 0.90))
+
     plt.savefig(outfile, dpi=200)
     plt.close()
 
 
+
+
 def plot_sweep_heatmap(rows: list[dict], outfile: str, title: str) -> None:
     import matplotlib
-    matplotlib.use("Agg")  # avoid Tk/Tcl backend (thread issues on Windows)
+    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    import textwrap
 
     if not rows:
         return
@@ -90,15 +114,22 @@ def plot_sweep_heatmap(rows: list[dict], outfile: str, title: str) -> None:
         r = tag_to_row[t]
         data.append([float(r[f"win_{s}"]) for s in strategies])
 
-    plt.figure(figsize=(max(7, len(strategies) * 1.6), max(6, len(lineup_tags) * 0.35)))
+    wrapped = "\n".join(textwrap.wrap(title, width=50))
+
+    plt.figure(figsize=(max(7, len(strategies) * 1.6),
+                        max(6, len(lineup_tags) * 0.35)))
     im = plt.imshow(data, aspect="auto")
     plt.colorbar(im, label="Win rate (%)")
     plt.xticks(range(len(strategies)), strategies, rotation=30, ha="right")
     plt.yticks(range(len(lineup_tags)), lineup_tags)
-    plt.title(title)
-    plt.tight_layout()
+    plt.title(wrapped, pad=14)
+
+    # Reserve top space for title
+    plt.tight_layout(rect=(0, 0, 1, 0.90))
+
     plt.savefig(outfile, dpi=200)
     plt.close()
+
 
 
 
