@@ -56,6 +56,135 @@ class Simulation:
     CHANCE_INDICES = {7, 22, 36}
     CHEST_INDICES = {2, 17, 33}
 
+    def can_mortgage(self, prop: Space, owner: Player) -> bool:
+        if prop.owner is not owner:
+            return False
+        if prop.mortgaged:
+            return False
+        if prop.type == "property":
+            # must have no buildings on this property
+            if prop.houses != 0:
+                return False
+            # (baseline rule) also require no buildings on any property of this color owned by player
+            if prop.color is not None:
+                for s in owner.properties:
+                    if s.type == "property" and s.color == prop.color and s.houses != 0:
+                        return False
+        return prop.type in {"property", "railroad", "utility"}
+
+
+    def sell_one_building(self, owner: Player) -> bool:
+        """
+        Sell ONE house/hotel (half cost). Returns True if sold anything.
+        We use a simple heuristic: sell the most expensive building first.
+        """
+        buildables = [p for p in owner.properties if p.type == "property" and p.houses > 0]
+        if not buildables:
+            return False
+
+        # choose the property with the highest house_cost to liquidate first
+        prop = max(buildables, key=lambda p: p.house_cost)
+
+        # Treat hotel as 5 "building units" for liquidation value; otherwise sell 1 house.
+        if prop.houses == 5:
+            sale_value = int((prop.house_cost * 5) / 2)  # half of 5 houses
+            prop.houses = 4  # (baseline) downgrade hotel to 4 houses; we aren't modeling house supply limits yet
+        else:
+            sale_value = int(prop.house_cost / 2)
+            prop.houses -= 1
+
+        owner.add_funds(sale_value)
+        return True
+
+
+    def mortgage_one_property(self, owner: Player) -> bool:
+        """
+        Mortgage ONE property (collect mortgage value).
+        Returns True if mortgaged something.
+        """
+        candidates = [p for p in owner.properties if self.can_mortgage(p, owner)]
+        if not candidates:
+            return False
+
+        # mortgage lowest-rent-impact first: utilities/railroads/properties all treated similarly here;
+        # heuristic: mortgage the lowest mortgage value first? (keeps high-value liquidity for later)
+        prop = min(candidates, key=lambda p: p.mortgage)
+        prop.mortgaged = True
+        owner.add_funds(prop.mortgage)
+        return True
+
+
+    def liquidate_until_can_pay(self, owner: Player, amount: int) -> bool:
+        """
+        Try to raise cash via selling buildings then mortgaging.
+        Return True if owner can pay amount after liquidation.
+        """
+        safety = 0
+        while owner.balance < amount and safety < 500:
+            safety += 1
+            if self.sell_one_building(owner):
+                continue
+            if self.mortgage_one_property(owner):
+                continue
+            break
+        return owner.balance >= amount
+
+
+    def transfer_assets_to_player(self, bankrupt: Player, creditor: Player) -> None:
+        """
+        Transfer all properties to creditor, preserving mortgaged state.
+        (Official rules include creditor choice and 10% interest; we can add later.)
+        """
+        for prop in list(bankrupt.properties):
+            prop.owner = creditor
+            creditor.properties.append(prop)
+        bankrupt.properties.clear()
+
+
+    def return_assets_to_bank(self, bankrupt: Player) -> None:
+        """Return properties to bank (unowned, unmortgaged, no buildings)."""
+        for prop in list(bankrupt.properties):
+            prop.owner = None
+            prop.mortgaged = False
+            prop.houses = 0
+        bankrupt.properties.clear()
+
+
+    def pay(self, payer: Player, amount: int, creditor: Player | None = None) -> bool:
+        """
+        Core payment routine implementing liquidation + bankruptcy.
+        creditor=None means bank.
+        Returns True if paid, False if payer bankrupt.
+        """
+        if amount <= 0:
+            return True
+
+        # Try to raise money before failing
+        if payer.balance < amount:
+            self.liquidate_until_can_pay(payer, amount)
+
+        if payer.balance >= amount:
+            payer.balance -= amount
+            if creditor is not None:
+                creditor.add_funds(amount)
+            return True
+
+        # Still can't pay -> bankruptcy
+        payer.balance = 0
+
+        # Before transferring assets, sell off remaining buildings (officially must)
+        # (we already tried selling, but do a full cleanup to be safe)
+        while self.sell_one_building(payer):
+            pass
+
+        if creditor is not None:
+            self.transfer_assets_to_player(payer, creditor)
+        else:
+            self.return_assets_to_bank(payer)
+
+        return False
+
+
     def resolve_landing(self, player_index: int) -> str:
         """Resolve the current space: cards, taxes, jail, property, etc."""
         player = self.players[player_index]
@@ -83,12 +212,15 @@ class Simulation:
 
             # Taxes (Hasbro official baseline amounts; choosing 10% needs net worth logic)
             if space.name == "Income Tax":
-                player.remove_funds(200)
-                return "OK" if player.balance > 0 else "BANKRUPT"
+                ok = self.pay(player, 200, creditor=None)
+                return "OK" if ok else "BANKRUPT"
+
 
             if space.name == "Luxury Tax":
-                player.remove_funds(100)
-                return "OK" if player.balance > 0 else "BANKRUPT"
+                ok = self.pay(player, 100, creditor=None)
+                return "OK" if ok else "BANKRUPT"
+
+
 
             # Normal property / rent / auction logic
             status = self.handle_property_logic(player, space, strategy)
@@ -392,7 +524,8 @@ class Simulation:
 
         if player.jail_turns >= 3:
             # Pay $50 to get out after third failed attempt (official)
-            player.remove_funds(50)
+            ok = self.pay(player, 50, creditor=None)
+            # if bankrupt from fee, treat as bankrupt (end game logic will handle)
             player.is_in_jail = False
             player.jail_turns = 0
             return True, total
@@ -542,9 +675,9 @@ class Simulation:
         # 2) OWNED BY SOMEONE ELSE → PAY RENT
         if space.owner and space.owner is not player:
             rent = self.calculate_rent(space)
-            success = player.remove_funds(rent)
-            space.owner.add_funds(rent)
-            return "OK" if success else "BANKRUPT"
+            ok = self.pay(player, rent, creditor=space.owner)
+            return "OK" if ok else "BANKRUPT"
+
 
         # 3) EVERYTHING ELSE → DO NOTHING
         return "OK"

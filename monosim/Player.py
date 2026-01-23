@@ -36,16 +36,15 @@ class Player:
 
     def remove_funds(self, amount):
         """
-        Removes money from the player's balance. 
-        Returns True if successful, False if bankrupt.
+        Removes money from the player's balance.
+        Returns True if successful, False if insufficient cash.
+        (Bankruptcy/liquidation is handled by Simulation, not here.)
         """
         if self.balance >= amount:
             self.balance -= amount
             return True
-        else:
-            # For a basic sim, we can just set to 0 or handle bankruptcy logic later
-            self.balance = 0
-            return False
+        return False
+
 
     def buy_property(self, property_space):
         """Adds a property object to the player's collection and deducts cost."""
