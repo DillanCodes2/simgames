@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import random
 from collections import Counter
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Protocol, Callable, Any
 
 from .Board import Board, Space
 from .Player import Player
@@ -13,6 +13,154 @@ KNOWN_STRATEGIES = {"Aggressive", "Cautious", "RailRoadTycoon", "ColorCollector"
 
 # Canonical ordering helpers (seat order is ignored everywhere in this project).
 STRATEGY_ORDER = tuple(sorted(KNOWN_STRATEGIES))
+
+# --- Controllers (for interactive play mode) ---------------------------------
+class Controller(Protocol):
+    """Decision source for a player (AI or human)."""
+
+    def label(self) -> str: ...
+    def decide_buy(self, sim: "Simulation", player_index: int, space: Space) -> bool: ...
+    def decide_max_bid(self, sim: "Simulation", player_index: int, space: Space) -> int: ...
+    def building_phase(self, sim: "Simulation", player_index: int) -> None: ...
+
+
+class StrategyController:
+    """Wrap an existing named strategy (Aggressive/Cautious/etc.) as a Controller."""
+
+    def __init__(self, strategy: str):
+        if strategy not in KNOWN_STRATEGIES:
+            raise ValueError(f"Unknown strategy '{strategy}'. Known: {sorted(KNOWN_STRATEGIES)}")
+        self.strategy = strategy
+
+    def label(self) -> str:
+        return self.strategy
+
+    def decide_buy(self, sim: "Simulation", player_index: int, space: Space) -> bool:
+        p = sim.players[player_index]
+        return sim.should_buy_unowned(p, space, self.strategy)
+
+    def decide_max_bid(self, sim: "Simulation", player_index: int, space: Space) -> int:
+        p = sim.players[player_index]
+        return sim.max_bid(p, space, self.strategy)
+
+    def building_phase(self, sim: "Simulation", player_index: int) -> None:
+        p = sim.players[player_index]
+        sim._auto_building_phase(p, self.strategy)
+
+
+class HumanController:
+    """Terminal-driven decisions."""
+
+    def __init__(self, name: str = "Human", input_fn: Optional[Callable[[str], str]] = None):
+        self._name = name
+        self._input = input_fn or input
+
+    def label(self) -> str:
+        return self._name
+
+    def _ask_yes_no(self, prompt: str, default: bool = False) -> bool:
+        suffix = " [Y/n] " if default else " [y/N] "
+        while True:
+            raw = (self._input(prompt + suffix) or "").strip().lower()
+            if raw == "" and default is not None:
+                return default
+            if raw in {"y", "yes"}:
+                return True
+            if raw in {"n", "no"}:
+                return False
+            print("Please enter y or n.")
+
+    def decide_buy(self, sim: "Simulation", player_index: int, space: Space) -> bool:
+        p = sim.players[player_index]
+        if p.balance < space.price:
+            print(f"Not enough cash to buy {space.name} (${space.price}).")
+            return False
+        return self._ask_yes_no(f"Buy {space.name} for ${space.price}? (balance=${p.balance})", default=False)
+
+    def decide_max_bid(self, sim: "Simulation", player_index: int, space: Space) -> int:
+        p = sim.players[player_index]
+        if p.balance <= 0:
+            return 0
+        while True:
+            raw = (self._input(
+                f"Auction for {space.name} (cost ${space.price}). Your balance=${p.balance}. "
+                f"Enter max bid (0 to pass): "
+            ) or "").strip()
+            try:
+                bid = int(raw)
+            except ValueError:
+                print("Enter an integer amount.")
+                continue
+            if bid < 0:
+                print("Bid must be >= 0.")
+                continue
+            if bid > p.balance:
+                print("You can't bid more than your balance.")
+                continue
+            return bid
+
+    def building_phase(self, sim: "Simulation", player_index: int) -> None:
+        # Simple: offer to buy ONE building at a time on any monopoly property.
+        p = sim.players[player_index]
+        board = sim.board
+
+        # list buildable props (monopoly, < hotel, not mortgaged)
+        buildables = []
+        for prop in p.properties:
+            if prop.type != "property" or prop.color is None:
+                continue
+            if prop.mortgaged:
+                continue
+            if not p.owns_monopoly(prop.color, board):
+                continue
+            if prop.houses >= 5:
+                continue
+            buildables.append(prop)
+
+        if not buildables:
+            return
+
+        # Loop: allow multiple purchases
+        while True:
+            print("\nBuilding phase. Your balance:", p.balance)
+            for i, prop in enumerate(buildables, start=1):
+                level = "Hotel" if prop.houses == 5 else f"{prop.houses} houses"
+                nxt = "Hotel" if prop.houses == 4 else f"{prop.houses + 1} houses"
+                print(f"  [{i}] {prop.name} ({prop.color}) - {level} -> {nxt} (cost ${prop.house_cost})")
+            print("  [0] Done building")
+
+            raw = (self._input("Choose a property number to build on: ") or "").strip()
+            try:
+                choice = int(raw)
+            except ValueError:
+                print("Enter a number.")
+                continue
+            if choice == 0:
+                return
+            if not (1 <= choice <= len(buildables)):
+                print("Invalid choice.")
+                continue
+
+            prop = buildables[choice - 1]
+            cost = prop.house_cost
+            if p.balance < cost:
+                print("Not enough cash.")
+                continue
+
+            ok = sim.pay(p, cost, creditor=None)
+            if not ok:
+                print("You went bankrupt while trying to build.")
+                return
+            prop.houses += 1
+            print(f"Built on {prop.name}. Now has {prop.houses} (5=hotel). Balance=${p.balance}")
+
+            # refresh buildables (might reach hotel)
+            buildables = [b for b in buildables if b.houses < 5]
+            if not buildables:
+                return
+
+# -----------------------------------------------------------------------------
+
 
 
 def lineup_tag(strategies: List[str]) -> str:
@@ -58,18 +206,36 @@ def generate_all_lineups(total_players: int = 4) -> List[List[str]]:
 
 
 class Simulation:
-    def __init__(self, strategies: List[str], seed: Optional[int] = None, params: Optional[dict] = None):
-        if len(strategies) != 4:
-            raise ValueError("Simulation requires exactly 4 players/strategies.")
-        unknown = [s for s in strategies if s not in KNOWN_STRATEGIES]
-        if unknown:
-            raise ValueError(f"Unknown strategy(ies): {unknown}. Known: {sorted(KNOWN_STRATEGIES)}")
-
+    def __init__(
+        self,
+        strategies: Optional[List[str]] = None,
+        seed: Optional[int] = None,
+        params: Optional[dict] = None,
+        controllers: Optional[List[Controller]] = None,
+        verbose: bool = False,
+        input_fn: Optional[Callable[[str], str]] = None,
+    ):
         self.params = params or {}
+        self.verbose = verbose
+        self._input = input_fn or input
+
+        # If controllers are provided, they define the players and decision-making.
+        self.controllers: Optional[List[Controller]] = controllers
+        if self.controllers is not None:
+            if len(self.controllers) != 4:
+                raise ValueError("Simulation requires exactly 4 controllers.")
+            self.strategies = [c.label() for c in self.controllers]
+        else:
+            if strategies is None or len(strategies) != 4:
+                raise ValueError("Simulation requires exactly 4 players/strategies.")
+            unknown = [s for s in strategies if s not in KNOWN_STRATEGIES]
+            if unknown:
+                raise ValueError(f"Unknown strategy(ies): {unknown}. Known: {sorted(KNOWN_STRATEGIES)}")
+            self.strategies = strategies
+
         self.rng = random.Random(seed)
         self.board = Board()
-        self.players = [Player(f"P{i+1} ({strat})") for i, strat in enumerate(strategies)]
-        self.strategies = strategies
+        self.players = [Player(f"P{i+1} ({label})") for i, label in enumerate(self.strategies)]
         self.turn_count = 0
         self.last_roll = 0
         self._init_decks()
@@ -81,6 +247,10 @@ class Simulation:
         self.chest_deck = self._build_chest_deck()
         self.rng.shuffle(self.chance_deck)
         self.rng.shuffle(self.chest_deck)
+
+    def _log(self, msg: str) -> None:
+        if self.verbose:
+            print(msg)
 
     def roll_dice(self):
         d1 = self.rng.randint(1, 6)
@@ -211,9 +381,13 @@ class Simulation:
             payer.balance -= amount
             if creditor is not None:
                 creditor.add_funds(amount)
+                self._log(f"{payer.name} paid ${amount} to {creditor.name}.")
+            else:
+                self._log(f"{payer.name} paid ${amount} to the bank.")
             return True
 
         # Still can't pay -> bankruptcy
+        self._log(f"{payer.name} cannot pay ${amount} and is BANKRUPT.")
         payer.balance = 0
 
         # Before transferring assets, sell off remaining buildings (officially must)
@@ -261,7 +435,7 @@ class Simulation:
                 ok = self.pay(player, 100, creditor=None)
                 return "OK" if ok else "BANKRUPT"
 
-            status = self.handle_property_logic(player, space, strategy)
+            status = self.handle_property_logic(player_index, player, space, strategy)
             return status
 
         return "OK"
@@ -467,6 +641,7 @@ class Simulation:
     def draw_card(self, deck_name: str, player_index: int) -> None:
         deck = self.chance_deck if deck_name == "chance" else self.chest_deck
         card_name, fn, keepable = deck.pop(0)
+        self._log(f"Drew card: {card_name}")
 
         keep = fn(player_index)
         if keepable and keep:
@@ -642,8 +817,11 @@ class Simulation:
 
         bids = []
         for i, p in enumerate(self.players):
-            strat = self.strategies[i]
-            bids.append((self.max_bid(p, space, strat), i))
+            if self.controllers is not None:
+                bids.append((self.controllers[i].decide_max_bid(self, i, space), i))
+            else:
+                strat = self.strategies[i]
+                bids.append((self.max_bid(p, space, strat), i))
 
         bids.sort(reverse=True, key=lambda x: x[0])
         top_bid = bids[0][0]
@@ -662,12 +840,18 @@ class Simulation:
         space.owner = winner
 
 
-    def handle_property_logic(self, player: Player, space: Space, strategy: str) -> str:
+    def handle_property_logic(self, player_index: int, player: Player, space: Space, strategy: str) -> str:
         if space.type in {"property", "railroad", "utility"} and space.owner is None:
-            if self.should_buy_unowned(player, space, strategy):
-                player.buy_property(space)
+            if self.controllers is not None:
+                if self.controllers[player_index].decide_buy(self, player_index, space):
+                    player.buy_property(space)
+                else:
+                    self.run_auction(space)
             else:
-                self.run_auction(space)
+                if self.should_buy_unowned(player, space, strategy):
+                    player.buy_property(space)
+                else:
+                    self.run_auction(space)
             return "OK"
 
         if space.owner and space.owner is not player:
@@ -677,7 +861,7 @@ class Simulation:
 
         return "OK"
 
-    def handle_housing_logic(self, player: Player, strategy: str) -> None:
+    def _auto_building_phase(self, player: Player, strategy: str) -> None:
         for prop in player.properties:
             if prop.type != "property" or prop.color is None:
                 continue
@@ -694,6 +878,16 @@ class Simulation:
                 ok = self.pay(player, prop.house_cost, creditor=None)
                 if ok:
                     prop.houses += 1
+
+
+    def handle_housing_logic(self, player_index: int) -> None:
+        """Building phase dispatcher."""
+        if self.controllers is not None:
+            self.controllers[player_index].building_phase(self, player_index)
+            return
+        player = self.players[player_index]
+        strategy = self.strategies[player_index]
+        self._auto_building_phase(player, strategy)
 
     # ... rest of file unchanged (run_turn, run_full_game, run_batch)
 
@@ -727,6 +921,7 @@ class Simulation:
             else:
                 d1, d2, roll_total, is_double = self.roll_dice()
                 self.last_roll = roll_total
+                self._log(f"Rolled {d1}+{d2}={roll_total}{' (double)' if is_double else ''}.")
 
                 if is_double:
                     consecutive_doubles += 1
@@ -740,6 +935,7 @@ class Simulation:
             # --- MOVE ---
             player.move(roll_total)
             current_space = self.board.get_space(player.position)
+            self._log(f"{player.name} landed on {current_space.name}.")
 
             # --- GO TO JAIL SPACE ---
             # official: landing on Go To Jail sends you to jail immediately (no property actions)
@@ -754,10 +950,32 @@ class Simulation:
                 return False
 
             # --- BUILDING PHASE ---
-            self.handle_housing_logic(player, strategy)
+            self.handle_housing_logic(player_index)
 
         return True
 
+
+    def run_interactive_game(self, max_turns: int = 1000) -> str:
+        """Play a full game with verbose logging and (potentially) human controllers.
+        Returns the winner label (controller/strategy label).
+        """
+        for t in range(max_turns):
+            self.turn_count += 1
+            self._log(f"\n=== Turn {self.turn_count} ===")
+            for i in range(4):
+                p = self.players[i]
+                if p.balance <= 0:
+                    continue
+                self._log(f"\n-- {p.name}'s turn (balance=${p.balance}) --")
+                self.run_turn(i)
+
+                active = [pl for pl in self.players if pl.balance > 0]
+                if len(active) <= 1:
+                    winner = active[0] if active else max(self.players, key=lambda x: x.balance)
+                    return self.strategies[self.players.index(winner)]
+
+        winner = max(self.players, key=lambda p: p.balance)
+        return self.strategies[self.players.index(winner)]
 
     def run_full_game(self, max_turns: int = 1000) -> Tuple[str, List[Tuple[str, int, int]]]:
         for _ in range(max_turns):
