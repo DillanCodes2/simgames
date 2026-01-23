@@ -38,6 +38,20 @@ def parse_lineup(items: List[str]) -> List[str]:
         strategies.extend([strat] * counts[strat])
     return strategies
 
+def plot_winrates(win_rates: dict, outfile: str) -> None:
+    import matplotlib.pyplot as plt
+    strategies = sorted(win_rates.keys())
+    values = [win_rates[s] for s in strategies]
+
+    plt.figure()
+    plt.bar(strategies, values)
+    plt.ylabel("Win rate (%)")
+    plt.title("Win Rates by Strategy (this lineup)")
+    plt.ylim(0, max(values) * 1.15 if max(values) > 0 else 1)
+    plt.tight_layout()
+    plt.savefig(outfile, dpi=200)
+    plt.close()
+
 
 def main(argv: Optional[List[str]] = None) -> None:
     parser = argparse.ArgumentParser(
@@ -53,6 +67,11 @@ def main(argv: Optional[List[str]] = None) -> None:
     parser.add_argument("--games", type=int, default=1000, help="Number of games to simulate.")
     parser.add_argument("--max-turns", type=int, default=1000, help="Max turns per game before declaring highest balance winner.")
     parser.add_argument("--seed", type=int, default=None, help="Optional seed for reproducible batch runs.")
+    parser.add_argument("--plot", action="store_true",
+                    help="Save a bar chart of win rates.")
+    parser.add_argument("--plot-file", default="winrates.png",
+                    help="Output PNG filename for the chart.")
+
 
     args = parser.parse_args(argv)
     strategies = parse_lineup(args.lineup)
@@ -64,6 +83,10 @@ def main(argv: Optional[List[str]] = None) -> None:
     print("\nWin rates (%):")
     for strat in sorted(KNOWN_STRATEGIES):
         print(f"  {strat:14s} {win_rates[strat]:6.2f}")
+        if args.plot:
+            plot_winrates(win_rates, args.plot_file)
+            print(f"\nSaved plot to: {args.plot_file}")
+
 
 
 if __name__ == "__main__":

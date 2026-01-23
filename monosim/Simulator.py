@@ -13,11 +13,11 @@ KNOWN_STRATEGIES = {"Aggressive", "Cautious", "RailRoadTycoon", "ColorCollector"
 
 
 class Simulation:
-    def __init__(self, strategies: List[str], seed: Optional[int] = None):
-        """
-        strategies: list of 4 strategy names, one per player.
-        Example: ["Aggressive", "Aggressive", "Cautious", "Cautious"]
-        """
+   class Simulation:
+    def __init__(self, strategies: List[str], seed: Optional[int] = None, params: Optional[dict] = None):
+        ...
+        self.params = params or {}
+
         if len(strategies) != 4:
             raise ValueError("Simulation requires exactly 4 players/strategies.")
         unknown = [s for s in strategies if s not in KNOWN_STRATEGIES]
@@ -70,8 +70,10 @@ class Simulation:
                 player.buy_property(space)
 
             elif strategy == "Cautious":
-                if player.balance - space.price >= 500:
+                cautious_min = int(self.params.get("cautious_min", 500))
+                if player.balance - space.price >= cautious_min:
                     player.buy_property(space)
+
 
             elif strategy == "RailRoadTycoon":
                 if space.type in {"railroad", "utility"}:
@@ -149,8 +151,15 @@ class Simulation:
         return winner_strategy, results
 
 
-def run_batch(iterations: int, strategies: List[str], max_turns: int = 1000, seed: Optional[int] = None) -> Dict[str, float]:
-    """Runs many independent games and returns win% per strategy in this lineup."""
+def run_batch(iterations: int, strategies: List[str], max_turns: int = 1000,
+              seed: Optional[int] = None, params: Optional[dict] = None) -> Dict[str, float]:
+
+    ...
+    for _ in range(iterations):
+        ...
+        sim = Simulation(strategies, seed=game_seed, params=params)
+        ...
+
     if len(strategies) != 4:
         raise ValueError("run_batch requires exactly 4 strategies.")
 
