@@ -11,6 +11,52 @@ from .Player import Player
 KNOWN_STRATEGIES = {"Aggressive", "Cautious", "RailRoadTycoon", "ColorCollector"}
 
 
+# Canonical ordering helpers (seat order is ignored everywhere in this project).
+STRATEGY_ORDER = tuple(sorted(KNOWN_STRATEGIES))
+
+
+def lineup_tag(strategies: List[str]) -> str:
+    """
+    Stable, human-readable identifier for a 4-player lineup, ignoring seating.
+    Example: "Aggressive=2|Cautious=1|RailRoadTycoon=1"
+    """
+    counts = {s: 0 for s in STRATEGY_ORDER}
+    for s in strategies:
+        if s not in KNOWN_STRATEGIES:
+            raise ValueError(f"Unknown strategy '{s}'")
+        counts[s] += 1
+    parts = [f"{s}={counts[s]}" for s in STRATEGY_ORDER if counts[s] > 0]
+    return "|".join(parts) if parts else "EMPTY"
+
+
+def generate_all_lineups(total_players: int = 4) -> List[List[str]]:
+    """
+    Generate every unique playstyle permutation where only counts matter (not seating).
+    With 4 strategies and 4 players, there are C(7,4)=35 lineups.
+    """
+    if total_players <= 0:
+        return []
+
+    strategies = list(STRATEGY_ORDER)
+
+    results: List[List[str]] = []
+
+    def rec(i: int, remaining: int, acc_counts: List[int]) -> None:
+        if i == len(strategies) - 1:
+            acc = acc_counts + [remaining]
+            lineup: List[str] = []
+            for strat, c in zip(strategies, acc):
+                lineup.extend([strat] * c)
+            results.append(lineup)
+            return
+
+        for c in range(remaining + 1):
+            rec(i + 1, remaining - c, acc_counts + [c])
+
+    rec(0, total_players, [])
+    return results
+
+
 class Simulation:
     def __init__(self, strategies: List[str], seed: Optional[int] = None, params: Optional[dict] = None):
         if len(strategies) != 4:
