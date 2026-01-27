@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 @dataclass
 class Space:
     name: str
-    type: str  # "property", "railroad", "utility", "special"
+    type: str  # property railroad special or utility
     price: int = 0
     color: Optional[str] = None
 
