@@ -3,11 +3,11 @@
 class Player:
     """Represents a player in the Monopoly simulation."""
 
-    def __init__(self, name, starting_balance=1500): #defines a player's state at the start of the game
+    def __init__(self, name, starting_balance=1500): 
         self.name = name
         self.balance = starting_balance
-        self.position = 0  # 0 is the index for 'Go'
-        self.properties = []  # List of Space objects owned
+        self.position = 0  
+        self.properties = []  
         self.is_in_jail = False
         self.jail_turns = 0
         self.get_out_of_jail_free_chance = 0
