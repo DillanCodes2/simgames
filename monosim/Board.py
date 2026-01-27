@@ -15,20 +15,12 @@ class Space:
     type: str  # property railroad special or utility
     price: int = 0
     color: Optional[str] = None
-
-    # For standard color properties: rent[0]=no houses, rent[1..4]=1-4 houses, rent[5]=hotel
+    # rent[0]=no houses, rent[5]=hotel
     rent: List[int] = field(default_factory=list)
-
-    # House cost (varies by color set in official rules)
     house_cost: int = 0
-
-    # Mortgage value (official: typically price/2 for properties; railroads/utilities also have mortgage values)
     mortgage: int = 0
     mortgaged: bool = False
-
-    # Buildings: 0..4 houses, 5 = hotel
     houses: int = 0
-
     owner: Optional["Player"] = None
 
 
